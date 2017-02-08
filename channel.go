@@ -335,6 +335,24 @@ func (bc *Channel) CancelTimerTask(timerID string) error {
 	return nil
 }
 
+// // TopicResult represents information of topic.
+// type TopicResult struct{}
+//
+// // QueryTopicList returns topics been used.
+// func (bc *Channel) QueryTopicList(opts url.Values) (int, []TopicResult, error) {}
+//
+// // DeviceStatistics represents statistic about devices installed app.
+// type DeviceStatistics struct{}
+//
+// // ReportDeviceStatistics returns statistics about devices installed app.
+// func (bc *Channel) ReportDeviceStatistics() (int, DeviceStatistics, error) {}
+//
+// // TopicStatistics represents statistic information about topic.
+// type TopicStatistics struct{}
+//
+// // ReportTopicStatistics returns statistic information about number of messages under some topic.
+// func (bc *Channel) ReportTopicStatistics() (int, TopicStatistics, error) {}
+
 func (bc *Channel) query(apiName, apiMethod string, musts, optionals url.Values) (map[string]interface{}, error) {
 	err := checkOptionalKeys(apiName, optionals)
 	if err != nil {
