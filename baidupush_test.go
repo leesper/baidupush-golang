@@ -155,6 +155,25 @@ func TestPushTimeMsg(t *testing.T) {
 		t.Errorf("return timer ID %s want %s", tid, timerID)
 	}
 
+	opts = url.Values{}
+	opts.Add("timer_id", tid)
+	totalNum, results, err := channel.QueryTimerTasks(opts)
+	if err != nil {
+		t.Error("query timer tasks error", err)
+	}
+
+	if totalNum != 1 {
+		t.Errorf("total num %d want 1", totalNum)
+	}
+
+	if results[0].ID != tid {
+		t.Errorf("timer ID %s want %s", results[0].ID, tid)
+	}
+
+	err = channel.CancelTimerTask(tid)
+	if err != nil {
+		t.Errorf("cancel timer %s error %v", tid, err)
+	}
 }
 
 func TestTagManagement(t *testing.T) {

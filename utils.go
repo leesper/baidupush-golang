@@ -64,6 +64,13 @@ var (
 			"range_start": true,
 			"range_end":   true,
 		},
+		"QueryTimerTasks": {
+			"expires":     true,
+			"device_type": true,
+			"timer_id":    true,
+			"start":       true,
+			"limit":       true,
+		},
 	}
 )
 
