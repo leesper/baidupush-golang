@@ -44,6 +44,26 @@ var (
 			"msg_expires": true,
 			"topic_id":    true,
 		},
+		"QueryMsgStatus": {
+			"expires":     true,
+			"device_type": true,
+		},
+		"QueryTopicRecords": {
+			"expires":     true,
+			"device_type": true,
+			"start":       true,
+			"limit":       true,
+			"range_start": true,
+			"range_end":   true,
+		},
+		"QueryTimerRecords": {
+			"expires":     true,
+			"device_type": true,
+			"start":       true,
+			"limit":       true,
+			"range_start": true,
+			"range_end":   true,
+		},
 	}
 )
 

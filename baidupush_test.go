@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"testing"
+	"time"
 )
 
 var (
@@ -55,6 +56,105 @@ func TestPushMsgToAllDevice(t *testing.T) {
 
 	fmt.Printf("push to all success, request ID %d message ID %s timer ID %s time %d\n",
 		channel.GetRequestID(), msgID, timerID, sendTime)
+}
+
+func TestPushMsgToTagDevice(t *testing.T) {
+	msg := `{
+    "title": "hello",
+    "description": "hello world",
+    "notification_basic_style": 7,
+    "open_type": 1,
+    "url": "http://developer.baidu.com",
+    "custom_content":{"push":"tag"}
+	}`
+	opts := url.Values{}
+	msgType := fmt.Sprintf("%d", MsgTypeNotice)
+	opts.Add("msg_type", msgType)
+	msgID, timerID, sendTime, err := channel.PushMsgToTaggedDevices("default", msg, opts)
+	if err != nil {
+		t.Error("push to tag error", err)
+	}
+	fmt.Printf("push to tag success, request ID %d message ID %s timer ID %s time %d\n",
+		channel.GetRequestID(), msgID, timerID, sendTime)
+
+	num, results, err := channel.QueryMsgStatus(msgID)
+	if err != nil {
+		t.Error("query msg status error", err)
+	}
+
+	if num != 1 {
+		t.Errorf("message num %d want 1", num)
+	}
+
+	if results[0].MsgID != msgID {
+		t.Errorf("message ID %s want %s", results[0].MsgID, msgID)
+	}
+}
+
+func TestPushMsgToBatchDevice(t *testing.T) {
+	msg := `{
+    "title": "hello",
+    "description": "hello world",
+    "notification_basic_style": 7,
+    "open_type": 1,
+    "url": "http://developer.baidu.com",
+    "custom_content":{"push":"batch"}
+	}`
+	opts := url.Values{}
+	msgType := fmt.Sprintf("%d", MsgTypeNotice)
+	opts.Add("msg_type", msgType)
+	topicID := "topic_batch"
+	opts.Add("topic_id", topicID)
+
+	msgID, sendTime, err := channel.PushMsgToBatchDevices([]string{channelID}, msg, opts)
+	if err != nil {
+		t.Error("push to batch error", err)
+	}
+
+	fmt.Printf("push to batch success, request ID %d message ID %s time %d\n",
+		channel.GetRequestID(), msgID, sendTime)
+
+	topic, _, err := channel.QueryTopicRecords(topicID, nil)
+	if err != nil {
+		t.Error("query topic records error", err)
+	}
+
+	if topic != topicID {
+		t.Errorf("return topic %s want %s", topic, topicID)
+	}
+}
+
+func TestPushTimeMsg(t *testing.T) {
+	msg := `{
+    "title": "hello",
+    "description": "hello world",
+    "notification_basic_style": 7,
+    "open_type": 1,
+    "url": "http://developer.baidu.com",
+    "custom_content":{"push":"timed"}
+	}`
+
+	opts := url.Values{}
+	msgType := fmt.Sprintf("%d", MsgTypeNotice)
+	opts.Add("msg_type", msgType)
+	opts.Add("send_time", fmt.Sprintf("%d", time.Now().Add(2*time.Minute).Unix()))
+	time.Sleep(4 * time.Second) // in case of push message too frequently to return error 30699
+	msgID, timerID, sendTime, err := channel.PushMsgToAllDevices(msg, opts)
+	if err != nil {
+		t.Fatal("push to all error", err)
+	}
+
+	fmt.Printf("push to all success, request ID %d message ID %s timer ID %s time %d\n",
+		channel.GetRequestID(), msgID, timerID, sendTime)
+
+	tid, _, err := channel.QueryTimerRecords(timerID, nil)
+	if err != nil {
+		t.Error("query timer records error", err)
+	}
+	if tid != timerID {
+		t.Errorf("return timer ID %s want %s", tid, timerID)
+	}
+
 }
 
 func TestTagManagement(t *testing.T) {
@@ -152,5 +252,4 @@ func TestTagManagement(t *testing.T) {
 	if tag3 != "tag3" {
 		t.Errorf("delete tag returns %s want tag3", tag3)
 	}
-
 }

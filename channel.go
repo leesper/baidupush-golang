@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"runtime"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -88,9 +89,17 @@ func (bc *Channel) pushMessage(apiName, apiMethod string, musts, optionals url.V
 
 	rspParams := result["response_params"].(map[string]interface{})
 	resultMap := map[string]interface{}{
-		"msg_id":    rspParams["msg_id"].(string),
-		"send_time": int64(rspParams["send_time"].(float64)),
-		"timer_id":  "",
+		"msg_id":   rspParams["msg_id"].(string),
+		"timer_id": "",
+	}
+
+	switch sendTime := rspParams["send_time"].(type) {
+	case string:
+		val, _ := strconv.ParseInt(sendTime, 10, 64)
+		resultMap["send_time"] = val
+	case float64:
+		val := int64(sendTime)
+		resultMap["send_time"] = val
 	}
 
 	if tid, ok := rspParams["timer_id"]; ok {
@@ -164,8 +173,8 @@ func (bc *Channel) PushMsgToAllDevices(msg string, opts url.Values) (string, str
 	return msgID, timerID, sendTime, nil
 }
 
-// PushMsgToTag pushes a message to a batch of devices under some tag.
-func (bc *Channel) PushMsgToTag(tag, msg string, opts url.Values) (string, string, int64, error) {
+// PushMsgToTaggedDevices pushes a message to devices under some tag.
+func (bc *Channel) PushMsgToTaggedDevices(tag, msg string, opts url.Values) (string, string, int64, error) {
 	var msgID, timerID string
 	var sendTime int64
 
@@ -184,6 +193,205 @@ func (bc *Channel) PushMsgToTag(tag, msg string, opts url.Values) (string, strin
 	sendTime = resultMap["send_time"].(int64)
 
 	return msgID, timerID, sendTime, nil
+}
+
+// MessageResult represents the information about sent message.
+type MessageResult struct {
+	MsgID    string
+	Status   int
+	Success  int
+	SendTime int64
+}
+
+// QueryMsgStatus queries message reports via msgID.
+func (bc *Channel) QueryMsgStatus(msgID string) (int, []MessageResult, error) {
+	totalNum := 0
+
+	musts := url.Values{}
+	musts.Add("msg_id", msgID)
+
+	resultMap, err := bc.query("QueryMsgStatus", "query_msg_status", musts, nil)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	totalNum = resultMap["total_num"].(int)
+	results := resultMap["result"].([]MessageResult)
+
+	return totalNum, results, nil
+}
+
+// QueryTimerRecords queries records of timed message via timerID.
+func (bc *Channel) QueryTimerRecords(timerID string, opts url.Values) (string, []MessageResult, error) {
+	var retTimerID string
+
+	musts := url.Values{}
+	musts.Add("timer_id", timerID)
+
+	resultMap, err := bc.query("QueryTimerRecords", "query_timer_records", musts, opts)
+	if err != nil {
+		return retTimerID, nil, err
+	}
+
+	retTimerID = resultMap["timer_id"].(string)
+	results := resultMap["result"].([]MessageResult)
+	return retTimerID, results, nil
+}
+
+// QueryTopicRecords queries records of topic message via topicID.
+func (bc *Channel) QueryTopicRecords(topicID string, opts url.Values) (string, []MessageResult, error) {
+	var retTopicID string
+
+	musts := url.Values{}
+	musts.Add("topic_id", topicID)
+
+	resultMap, err := bc.query("QueryTopicRecords", "query_topic_records", musts, opts)
+	if err != nil {
+		return retTopicID, nil, err
+	}
+
+	retTopicID = resultMap["topic_id"].(string)
+	results := resultMap["result"].([]MessageResult)
+	return retTopicID, results, nil
+}
+
+// TimerResult represents information about timed task.
+type TimerResult struct {
+	ID        string
+	Msg       string
+	SendTime  int64
+	MsgType   int
+	RangeType int
+}
+
+// QueryTimerTasks queries timer tasks not executing yet.
+func (bc *Channel) QueryTimerTasks(opts url.Values) (int, []TimerResult, error) {
+	var totalNum int
+
+	err := checkOptionalKeys("QueryTimerTasks", opts)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	query := absorbOptionalKeys(commonRequestParams(bc.apiKey, bc.deviceType), opts)
+
+	data, err := requestService(bc.host, "timer", "query_list", http.MethodGet, bc.secret, query)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	result := map[string]interface{}{}
+	err = json.Unmarshal(data, &result)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	bc.requestID = int64(result["request_id"].(float64))
+	if errCode, ok := result["error_code"]; ok {
+		return totalNum, nil, checkErrorCode(int(errCode.(float64)))
+	}
+
+	rspParams := result["response_params"].(map[string]interface{})
+	totalNum = int(rspParams["total_num"].(float64))
+
+	timerResults := []TimerResult{}
+	resultData := rspParams["result"].([]interface{})
+	for _, r := range resultData {
+		rMap := r.(map[string]interface{})
+		timerResult := TimerResult{
+			ID:        rMap["timer_id"].(string),
+			Msg:       rMap["msg"].(string),
+			SendTime:  int64(rMap["send_time"].(float64)),
+			MsgType:   int(rMap["msg_type"].(float64)),
+			RangeType: int(rMap["range_type"].(float64)),
+		}
+		timerResults = append(timerResults, timerResult)
+	}
+
+	return totalNum, timerResults, nil
+}
+
+// CancelTimerTask cancels timed message not executing yet.
+func (bc *Channel) CancelTimerTask(timerID string) error {
+	query := commonRequestParams(bc.apiKey, bc.deviceType)
+	query.Add("timer_id", timerID)
+
+	data, err := requestService(bc.host, "timer", "cancel", http.MethodPost, bc.secret, query)
+	if err != nil {
+		return err
+	}
+
+	result := map[string]interface{}{}
+	err = json.Unmarshal(data, &result)
+	if err != nil {
+		return err
+	}
+
+	bc.requestID = int64(result["request_id"].(float64))
+	if errCode, ok := result["error_code"]; ok {
+		return checkErrorCode(int(errCode.(float64)))
+	}
+
+	return nil
+}
+
+func (bc *Channel) query(apiName, apiMethod string, musts, optionals url.Values) (map[string]interface{}, error) {
+	err := checkOptionalKeys(apiName, optionals)
+	if err != nil {
+		return nil, err
+	}
+
+	query := absorbOptionalKeys(commonRequestParams(bc.apiKey, bc.deviceType), musts, optionals)
+
+	data, err := requestService(bc.host, "report", apiMethod, http.MethodGet, bc.secret, query)
+	if err != nil {
+		return nil, err
+	}
+
+	result := map[string]interface{}{}
+	err = json.Unmarshal(data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	bc.requestID = int64(result["request_id"].(float64))
+	if errCode, ok := result["error_code"]; ok {
+		return nil, checkErrorCode(int(errCode.(float64)))
+	}
+
+	rspParams := result["response_params"].(map[string]interface{})
+
+	resultMap := map[string]interface{}{}
+	if total, ok := rspParams["total_num"]; ok {
+		resultMap["total_num"] = int(total.(float64))
+	}
+
+	if timer, ok := rspParams["timer_id"]; ok {
+		resultMap["timer_id"] = timer.(string)
+	}
+
+	if topic, ok := rspParams["topic_id"]; ok {
+		resultMap["topic_id"] = topic.(string)
+	}
+
+	results := []MessageResult{}
+	resultData := rspParams["result"].([]interface{})
+	for _, r := range resultData {
+		rMap := r.(map[string]interface{})
+		queryResult := MessageResult{
+			MsgID:    rMap["msg_id"].(string),
+			Status:   int(rMap["status"].(float64)),
+			SendTime: int64(rMap["send_time"].(float64)),
+		}
+		if succ, ok := rMap["success"]; ok {
+			queryResult.Success = int(succ.(float64))
+		}
+		results = append(results, queryResult)
+	}
+
+	resultMap["result"] = results
+
+	return resultMap, nil
 }
 
 // TagInfo represents information about a tag.
