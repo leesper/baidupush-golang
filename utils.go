@@ -22,6 +22,28 @@ var (
 			"deploy_status": true,
 			"send_time":     true,
 		},
+		"QueryTagsInfo": {
+			"expires":     true,
+			"device_type": true,
+			"tag":         true,
+			"start":       true,
+			"limit":       true,
+		},
+		"PushMsgToTag": {
+			"expires":       true,
+			"device_type":   true,
+			"msg_type":      true,
+			"msg_expires":   true,
+			"deploy_status": true,
+			"send_time":     true,
+		},
+		"PushMsgToBatchDevices": {
+			"expires":     true,
+			"device_type": true,
+			"msg_type":    true,
+			"msg_expires": true,
+			"topic_id":    true,
+		},
 	}
 )
 
