@@ -1,4 +1,4 @@
-BaiduPush-Golang Library v1.0
+BaiduPush-Golang SDK v1.0
 ===========================================
 
 A Golang SDK for working with Baidu Cloud Push Service.
