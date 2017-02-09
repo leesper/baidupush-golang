@@ -122,6 +122,47 @@ func TestPushMsgToBatchDevice(t *testing.T) {
 	if topic != topicID {
 		t.Errorf("return topic %s want %s", topic, topicID)
 	}
+
+	total, topicResults, err := channel.QueryTopicList(nil)
+	if err != nil {
+		t.Error("query topic list error", err)
+	}
+
+	if total != 1 {
+		t.Errorf("total %d want 1", total)
+	}
+
+	if topicResults[0].Topic != topicID {
+		t.Errorf("return topic %s want %s", topicResults[0].Topic, topicID)
+	}
+
+	total, stats, err := channel.ReportTopicStatistics(topicID)
+	if err != nil {
+		t.Errorf("report topic %s stat error %s", topicID, err)
+	}
+
+	if total != 1 {
+		t.Errorf("total %d want 1", total)
+	}
+
+	if len(stats) != 1 {
+		t.Errorf("stats length %d want 1", len(stats))
+	}
+}
+
+func TestReportDeviceStat(t *testing.T) {
+	total, devStat, err := channel.ReportDeviceStatistics()
+	if err != nil {
+		t.Error("report device statistics error", err)
+	}
+
+	if total != 1 {
+		t.Errorf("total %d want 1", total)
+	}
+
+	if len(devStat) != 1 {
+		t.Errorf("device stat length %d want 1", len(devStat))
+	}
 }
 
 func TestPushTimeMsg(t *testing.T) {

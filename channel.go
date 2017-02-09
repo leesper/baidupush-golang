@@ -44,6 +44,14 @@ type Channel struct {
 }
 
 // NewChannel returns a channel bound with specified paramters.
+//
+// host: URL address of Baidu Cloud Push Service.
+//
+// key: API key.
+//
+// secret: API secret.
+//
+// device: Device type, AppleDeviceType or AndroidDeviceType.
 func NewChannel(host, key, secret string, device int) *Channel {
 	return &Channel{
 		host:       host,
@@ -63,52 +71,19 @@ func (bc *Channel) GetRequestID() int64 {
 	return bc.requestID
 }
 
-func (bc *Channel) pushMessage(apiName, apiMethod string, musts, optionals url.Values) (map[string]interface{}, error) {
-	err := checkOptionalKeys(apiName, optionals)
-	if err != nil {
-		return nil, err
-	}
-
-	query := absorbOptionalKeys(commonRequestParams(bc.apiKey, bc.deviceType), musts, optionals)
-
-	data, err := requestService(bc.host, "push", apiMethod, http.MethodPost, bc.secret, query)
-	if err != nil {
-		return nil, err
-	}
-
-	result := map[string]interface{}{}
-	err = json.Unmarshal(data, &result)
-	if err != nil {
-		return nil, err
-	}
-
-	bc.requestID = int64(result["request_id"].(float64))
-	if errCode, ok := result["error_code"]; ok {
-		return nil, checkErrorCode(int(errCode.(float64)))
-	}
-
-	rspParams := result["response_params"].(map[string]interface{})
-	resultMap := map[string]interface{}{
-		"msg_id":   rspParams["msg_id"].(string),
-		"timer_id": "",
-	}
-
-	switch sendTime := rspParams["send_time"].(type) {
-	case string:
-		val, _ := strconv.ParseInt(sendTime, 10, 64)
-		resultMap["send_time"] = val
-	case float64:
-		val := int64(sendTime)
-		resultMap["send_time"] = val
-	}
-
-	if tid, ok := rspParams["timer_id"]; ok {
-		resultMap["timer_id"] = tid.(string)
-	}
-	return resultMap, nil
-}
-
 // PushMsgToSingleDevice pushes a message to a single device.
+//
+// channelID: Channel ID of the device.
+//
+// msg: Message to push.
+//
+// Optional parameters:
+//
+// msg_type: Type of message, MsgTypeNotice or MsgTypeMessage(default).
+//
+// msg_expires: 0-604800, defaults to 5 hrs, the time message expired(from the moment on).
+//
+// deploy_status: Deployment status(for iOS app only), DeployStatusProduct(default) or DeployStatusDevelop.
 func (bc *Channel) PushMsgToSingleDevice(channelID string, msg string, opts url.Values) (string, int64, error) {
 	var msgID string
 	var sendTime int64
@@ -128,7 +103,87 @@ func (bc *Channel) PushMsgToSingleDevice(channelID string, msg string, opts url.
 	return msgID, sendTime, nil
 }
 
+// PushMsgToAllDevices pushes a message to all devices running app.
+//
+// msg: Message to push
+//
+// Optional parameters:
+//
+// msg_type: Type of message, MsgTypeNotice or MsgTypeMessage(default).
+//
+// msg_expires: 0-604800, defaults to 5 hrs, the time message expired(from the moment on).
+//
+// deploy_status: Deployment status(for iOS app only), DeployStatusProduct(default) or DeployStatusDevelop.
+//
+// send_time: The real sending time for timed message, must be at least 60s and at most 1 year.
+func (bc *Channel) PushMsgToAllDevices(msg string, opts url.Values) (string, string, int64, error) {
+	var msgID, timerID string
+	var sendTime int64
+
+	musts := url.Values{}
+	musts.Add("msg", msg)
+
+	resultMap, err := bc.pushMessage("PushMsgToAllDevice", "all", musts, opts)
+	if err != nil {
+		return msgID, timerID, sendTime, err
+	}
+
+	msgID = resultMap["msg_id"].(string)
+	timerID = resultMap["timer_id"].(string)
+	sendTime = resultMap["send_time"].(int64)
+
+	return msgID, timerID, sendTime, nil
+}
+
+// PushMsgToTaggedDevices pushes a message to devices under some tag.
+//
+// tag: Name of created tag.
+//
+// msg: Message to push.
+//
+// Optional parameters:
+//
+// msg_type: Type of message, MsgTypeNotice or MsgTypeMessage(default).
+//
+// msg_expires: 0-604800, defaults to 5 hrs, the time message expired(from the moment on).
+//
+// deploy_status: Deployment status(for iOS app only), DeployStatusProduct(default) or DeployStatusDevelop.
+//
+// send_time: The real sending time for timed message, must be at least 60s and at most 1 year.
+func (bc *Channel) PushMsgToTaggedDevices(tag, msg string, opts url.Values) (string, string, int64, error) {
+	var msgID, timerID string
+	var sendTime int64
+
+	musts := url.Values{}
+	musts.Add("type", fmt.Sprintf("%d", 1))
+	musts.Add("tag", tag)
+	musts.Add("msg", msg)
+
+	resultMap, err := bc.pushMessage("PushMsgToTag", "tags", musts, opts)
+	if err != nil {
+		return msgID, timerID, sendTime, err
+	}
+
+	msgID = resultMap["msg_id"].(string)
+	timerID = resultMap["timer_id"].(string)
+	sendTime = resultMap["send_time"].(int64)
+
+	return msgID, timerID, sendTime, nil
+}
+
 // PushMsgToBatchDevices pushes a message to a batch of devices.
+//
+// channelIDs: Channel IDs of devices.
+//
+// msg: Message to push.
+//
+// Optional parameters:
+//
+// msg_type: Type of message, MsgTypeNotice or MsgTypeMessage(default).
+//
+// msg_expires: 0-604800, defaults to 5 hrs, the time message expired(from the moment on).
+//
+// topic_id: Name of the topic.
 func (bc *Channel) PushMsgToBatchDevices(channelIDs []string, msg string, opts url.Values) (string, int64, error) {
 	var msgID string
 	var sendTime int64
@@ -153,48 +208,6 @@ func (bc *Channel) PushMsgToBatchDevices(channelIDs []string, msg string, opts u
 	return msgID, sendTime, nil
 }
 
-// PushMsgToAllDevices pushes a message to all devices running app.
-func (bc *Channel) PushMsgToAllDevices(msg string, opts url.Values) (string, string, int64, error) {
-	var msgID, timerID string
-	var sendTime int64
-
-	musts := url.Values{}
-	musts.Add("msg", msg)
-
-	resultMap, err := bc.pushMessage("PushMsgToAllDevice", "all", musts, opts)
-	if err != nil {
-		return msgID, timerID, sendTime, err
-	}
-
-	msgID = resultMap["msg_id"].(string)
-	timerID = resultMap["timer_id"].(string)
-	sendTime = resultMap["send_time"].(int64)
-
-	return msgID, timerID, sendTime, nil
-}
-
-// PushMsgToTaggedDevices pushes a message to devices under some tag.
-func (bc *Channel) PushMsgToTaggedDevices(tag, msg string, opts url.Values) (string, string, int64, error) {
-	var msgID, timerID string
-	var sendTime int64
-
-	musts := url.Values{}
-	musts.Add("type", fmt.Sprintf("%d", 1))
-	musts.Add("tag", tag)
-	musts.Add("msg", msg)
-
-	resultMap, err := bc.pushMessage("PushMsgToTag", "tags", musts, opts)
-	if err != nil {
-		return msgID, timerID, sendTime, err
-	}
-
-	msgID = resultMap["msg_id"].(string)
-	timerID = resultMap["timer_id"].(string)
-	sendTime = resultMap["send_time"].(int64)
-
-	return msgID, timerID, sendTime, nil
-}
-
 // MessageResult represents the information about sent message.
 type MessageResult struct {
 	MsgID    string
@@ -204,6 +217,8 @@ type MessageResult struct {
 }
 
 // QueryMsgStatus queries message reports via msgID.
+//
+// msgID: Message ID, could be a json array of IDs.
 func (bc *Channel) QueryMsgStatus(msgID string) (int, []MessageResult, error) {
 	totalNum := 0
 
@@ -222,6 +237,18 @@ func (bc *Channel) QueryMsgStatus(msgID string) (int, []MessageResult, error) {
 }
 
 // QueryTimerRecords queries records of timed message via timerID.
+//
+// timerID: ID of timer task.
+//
+// Optional parameters:
+//
+// start: the start position of the returned records, defaults to 0.
+//
+// limit: the number of records returned, must be 1-100, defaults to 100.
+//
+// range_start: UNIX timestamp, the start time to query.
+//
+// range_end: UNIX timestamp, the end time to query.
 func (bc *Channel) QueryTimerRecords(timerID string, opts url.Values) (string, []MessageResult, error) {
 	var retTimerID string
 
@@ -239,6 +266,18 @@ func (bc *Channel) QueryTimerRecords(timerID string, opts url.Values) (string, [
 }
 
 // QueryTopicRecords queries records of topic message via topicID.
+//
+// topicID: Name of the topic.
+//
+// Optional parameters:
+//
+// start: the start position of the returned records, defaults to 0.
+//
+// limit: the number of records returned, must be 1-100, defaults to 100.
+//
+// range_start: UNIX timestamp, the start time to query.
+//
+// range_end: UNIX timestamp, the end time to query.
 func (bc *Channel) QueryTopicRecords(topicID string, opts url.Values) (string, []MessageResult, error) {
 	var retTopicID string
 
@@ -255,6 +294,140 @@ func (bc *Channel) QueryTopicRecords(topicID string, opts url.Values) (string, [
 	return retTopicID, results, nil
 }
 
+// TagInfo represents information about a tag.
+type TagInfo struct {
+	TID        string
+	Tag        string
+	Info       string
+	Type       int // deprecated
+	CreateTime int64
+}
+
+// QueryTagsInfo querys tags information of app, opts contains optional parameters below.
+//
+// Optional parameters:
+//
+// tag: name of the tag, must be of length 1-128, "default" is reserved so cannot be used.
+//
+// start: the start position of the returned records, defaults to 0.
+//
+// limit: the number of records returned, must be 1-100, defaults to 100.
+func (bc *Channel) QueryTagsInfo(opts url.Values) (int, []TagInfo, error) {
+	totalNum := 0
+	tagInfos := []TagInfo{}
+
+	err := checkOptionalKeys("QueryTagsInfo", opts)
+	if err != nil {
+		return totalNum, nil, err
+	}
+	query := absorbOptionalKeys(commonRequestParams(bc.apiKey, bc.deviceType), opts)
+
+	data, err := requestService(bc.host, "app", "query_tags", http.MethodGet, bc.secret, query)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	result := map[string]interface{}{}
+	err = json.Unmarshal(data, &result)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	bc.requestID = int64(result["request_id"].(float64))
+	if errCode, ok := result["error_code"]; ok {
+		return totalNum, nil, checkErrorCode(int(errCode.(float64)))
+	}
+
+	rspParams := result["response_params"].(map[string]interface{})
+	totalNum = int(rspParams["total_num"].(float64))
+	tags := rspParams["result"].([]interface{})
+
+	for _, tagData := range tags {
+		tagMap := tagData.(map[string]interface{})
+		tid := tagMap["tid"].(string)
+		tag := tagMap["tag"].(string)
+		info := tagMap["info"].(string)
+		typ := int(tagMap["type"].(float64))
+		createTime := int64(tagMap["create_time"].(float64))
+		tagInfo := TagInfo{
+			TID:        tid,
+			Tag:        tag,
+			Info:       info,
+			Type:       typ,
+			CreateTime: createTime,
+		}
+		tagInfos = append(tagInfos, tagInfo)
+	}
+	return totalNum, tagInfos, nil
+}
+
+// CreateTag creates an empty tag group.
+//
+// tag: Name of the tag, must be of length 1-128, "default" is reserved so cannot be used.
+func (bc *Channel) CreateTag(tag string) (string, error) {
+	return bc.manageTag("create_tag", tag)
+}
+
+// DeleteTag deletes an existed tag group.
+//
+// tag: Name of the tag, must be of length 1-128, "default" is reserved so cannot be used.
+func (bc *Channel) DeleteTag(tag string) (string, error) {
+	return bc.manageTag("del_tag", tag)
+}
+
+// TagResult represents the result of add/delete devices from tag group.
+type TagResult struct {
+	ChnID string
+	Res   int
+}
+
+// AddTagDevices adds a batch of devices to a tag group.
+//
+// tag: name of the tag, must be of length 1-128, "default" is reserved so cannot be used.
+//
+// channelIDs: a string slice containing channel IDs to add, require at least 1 and at most 10.
+func (bc *Channel) AddTagDevices(tag string, channelIDs []string) ([]TagResult, error) {
+	return bc.manageTagDevices("add_devices", tag, channelIDs)
+}
+
+// DeleteTagDevices deletes a batch of devices from a tag group.
+//
+// tag: name of the tag, must be of length 1-128, "default" is reserved so cannot be used.
+//
+// channelIDs: a string slice containing channel IDs to add, require at least 1 and at most 10.
+func (bc *Channel) DeleteTagDevices(tag string, channelIDs []string) ([]TagResult, error) {
+	return bc.manageTagDevices("del_devices", tag, channelIDs)
+}
+
+// GetTagDevicesNumber returns the number of devices related to tag.
+func (bc *Channel) GetTagDevicesNumber(tag string) (int, error) {
+	num := 0
+
+	query := commonRequestParams(bc.apiKey, bc.deviceType)
+	query.Add("tag", tag)
+
+	data, err := requestService(bc.host, "tag", "device_num", http.MethodGet, bc.secret, query)
+	if err != nil {
+		return num, err
+	}
+
+	result := map[string]interface{}{}
+	err = json.Unmarshal(data, &result)
+	if err != nil {
+		return num, err
+	}
+
+	bc.requestID = int64(result["request_id"].(float64))
+	if errCode, ok := result["error_code"]; ok {
+		return num, checkErrorCode(int(errCode.(float64)))
+	}
+
+	rspParams := result["response_params"].(map[string]interface{})
+	num = int(rspParams["device_num"].(float64))
+
+	return num, nil
+}
+
 // TimerResult represents information about timed task.
 type TimerResult struct {
 	ID        string
@@ -265,6 +438,14 @@ type TimerResult struct {
 }
 
 // QueryTimerTasks queries timer tasks not executing yet.
+//
+// Optional parameters:
+//
+// timer_id: ID of timed task.
+//
+// start: the start position of the returned records, defaults to 0.
+//
+// limit: the number of records returned, must be 1-100, defaults to 100.
 func (bc *Channel) QueryTimerTasks(opts url.Values) (int, []TimerResult, error) {
 	var totalNum int
 
@@ -312,6 +493,8 @@ func (bc *Channel) QueryTimerTasks(opts url.Values) (int, []TimerResult, error) 
 }
 
 // CancelTimerTask cancels timed message not executing yet.
+//
+// timerID: ID of timed task.
 func (bc *Channel) CancelTimerTask(timerID string) error {
 	query := commonRequestParams(bc.apiKey, bc.deviceType)
 	query.Add("timer_id", timerID)
@@ -335,23 +518,219 @@ func (bc *Channel) CancelTimerTask(timerID string) error {
 	return nil
 }
 
-// // TopicResult represents information of topic.
-// type TopicResult struct{}
+// TopicResult represents information of topic.
+type TopicResult struct {
+	AckCount, PushCount int
+	FirstTime, LastTime int64
+	Topic               string
+}
+
+// QueryTopicList returns topics been used.
 //
-// // QueryTopicList returns topics been used.
-// func (bc *Channel) QueryTopicList(opts url.Values) (int, []TopicResult, error) {}
+// Optional parameters:
 //
-// // DeviceStatistics represents statistic about devices installed app.
-// type DeviceStatistics struct{}
+// start: the start position of the returned records, defaults to 0.
 //
-// // ReportDeviceStatistics returns statistics about devices installed app.
-// func (bc *Channel) ReportDeviceStatistics() (int, DeviceStatistics, error) {}
+// limit: the number of records returned, must be 1-100, defaults to 100.
+func (bc *Channel) QueryTopicList(opts url.Values) (int, []TopicResult, error) {
+	totalNum := 0
+
+	err := checkOptionalKeys("QueryTopicList", opts)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	query := absorbOptionalKeys(commonRequestParams(bc.apiKey, bc.deviceType), opts)
+
+	data, err := requestService(bc.host, "topic", "query_list", http.MethodGet, bc.secret, query)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	result := map[string]interface{}{}
+	err = json.Unmarshal(data, &result)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	bc.requestID = int64(result["request_id"].(float64))
+	if errCode, ok := result["error_code"]; ok {
+		return totalNum, nil, checkErrorCode(int(errCode.(float64)))
+	}
+
+	rspParams := result["response_params"].(map[string]interface{})
+	totalNum = int(rspParams["total_num"].(float64))
+	topicsData := rspParams["result"].([]interface{})
+	topicsResults := []TopicResult{}
+	for _, t := range topicsData {
+		tMap := t.(map[string]interface{})
+		topicResult := TopicResult{
+			AckCount:  int(tMap["ack_cnt"].(float64)),
+			FirstTime: int64(tMap["ctime"].(float64)),
+			LastTime:  int64(tMap["mtime"].(float64)),
+			PushCount: int(tMap["push_cnt"].(float64)),
+			Topic:     tMap["topic_id"].(string),
+		}
+		topicsResults = append(topicsResults, topicResult)
+	}
+
+	return totalNum, topicsResults, nil
+}
+
+// DeviceStatistics represents statistic about devices installed app.
+type DeviceStatistics struct {
+	Day           int64
+	DailyNewUser  int
+	DailyLostUser int
+	DailyOnline   int
+	AddedupTerm   int
+	AvailChnID    int
+}
+
+// ReportDeviceStatistics returns statistics about devices installed app.
+func (bc *Channel) ReportDeviceStatistics() (int, []DeviceStatistics, error) {
+	totalNum := 0
+
+	query := commonRequestParams(bc.apiKey, bc.deviceType)
+
+	data, err := requestService(bc.host, "report", "statistic_device", http.MethodGet, bc.secret, query)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	result := map[string]interface{}{}
+	err = json.Unmarshal(data, &result)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	bc.requestID = int64(result["request_id"].(float64))
+	if errCode, ok := result["error_code"]; ok {
+		return totalNum, nil, checkErrorCode(int(errCode.(float64)))
+	}
+
+	rspParams := result["response_params"].(map[string]interface{})
+	totalNum = int(rspParams["total_num"].(float64))
+	statData := rspParams["result"].(map[string]interface{})
+	deviceStat := []DeviceStatistics{}
+	for k, v := range statData {
+		tts, _ := strconv.ParseInt(k, 10, 64)
+		vMap := v.(map[string]interface{})
+		newTerm := int(vMap["new_term"].(float64))
+		delTerm := int(vMap["del_term"].(float64))
+		totalTerm := int(vMap["total_term"].(float64))
+		onlineTerm, addupTerm := 0, 0
+		if _, ok := vMap["online_term"]; ok {
+			onlineTerm = int(vMap["online_term"].(float64))
+		}
+		if _, ok := vMap["addup_term"]; ok {
+			addupTerm = int(vMap["addup_term"].(float64))
+		}
+		ds := DeviceStatistics{
+			Day:           tts,
+			DailyNewUser:  newTerm,
+			DailyLostUser: delTerm,
+			DailyOnline:   onlineTerm,
+			AddedupTerm:   addupTerm,
+			AvailChnID:    totalTerm,
+		}
+		deviceStat = append(deviceStat, ds)
+	}
+	return totalNum, deviceStat, nil
+}
+
+// TopicStatistics represents statistic information about topic.
+type TopicStatistics struct {
+	Day int64
+	Ack int
+}
+
+// ReportTopicStatistics returns statistic information about number of messages under some topic.
 //
-// // TopicStatistics represents statistic information about topic.
-// type TopicStatistics struct{}
-//
-// // ReportTopicStatistics returns statistic information about number of messages under some topic.
-// func (bc *Channel) ReportTopicStatistics() (int, TopicStatistics, error) {}
+// topicID: Name of the topic.
+func (bc *Channel) ReportTopicStatistics(topicID string) (int, []TopicStatistics, error) {
+	totalNum := 0
+
+	query := commonRequestParams(bc.apiKey, bc.deviceType)
+	query.Add("topic_id", topicID)
+
+	data, err := requestService(bc.host, "report", "statistic_topic", http.MethodGet, bc.secret, query)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	result := map[string]interface{}{}
+	err = json.Unmarshal(data, &result)
+	if err != nil {
+		return totalNum, nil, err
+	}
+
+	bc.requestID = int64(result["request_id"].(float64))
+	if errCode, ok := result["error_code"]; ok {
+		return totalNum, nil, checkErrorCode(int(errCode.(float64)))
+	}
+
+	rspParams := result["response_params"].(map[string]interface{})
+	totalNum = int(rspParams["total_num"].(float64))
+	statData := rspParams["result"].(map[string]interface{})
+	topicStat := []TopicStatistics{}
+	for k, v := range statData {
+		tts, _ := strconv.ParseInt(k, 10, 64)
+		vMap := v.(map[string]interface{})
+		ack := int(vMap["ack"].(float64))
+		ts := TopicStatistics{
+			Day: tts,
+			Ack: ack,
+		}
+		topicStat = append(topicStat, ts)
+	}
+	return totalNum, topicStat, nil
+}
+
+func (bc *Channel) pushMessage(apiName, apiMethod string, musts, optionals url.Values) (map[string]interface{}, error) {
+	err := checkOptionalKeys(apiName, optionals)
+	if err != nil {
+		return nil, err
+	}
+
+	query := absorbOptionalKeys(commonRequestParams(bc.apiKey, bc.deviceType), musts, optionals)
+
+	data, err := requestService(bc.host, "push", apiMethod, http.MethodPost, bc.secret, query)
+	if err != nil {
+		return nil, err
+	}
+
+	result := map[string]interface{}{}
+	err = json.Unmarshal(data, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	bc.requestID = int64(result["request_id"].(float64))
+	if errCode, ok := result["error_code"]; ok {
+		return nil, checkErrorCode(int(errCode.(float64)))
+	}
+
+	rspParams := result["response_params"].(map[string]interface{})
+	resultMap := map[string]interface{}{
+		"msg_id":   rspParams["msg_id"].(string),
+		"timer_id": "",
+	}
+
+	switch sendTime := rspParams["send_time"].(type) {
+	case string:
+		val, _ := strconv.ParseInt(sendTime, 10, 64)
+		resultMap["send_time"] = val
+	case float64:
+		val := int64(sendTime)
+		resultMap["send_time"] = val
+	}
+
+	if tid, ok := rspParams["timer_id"]; ok {
+		resultMap["timer_id"] = tid.(string)
+	}
+	return resultMap, nil
+}
 
 func (bc *Channel) query(apiName, apiMethod string, musts, optionals url.Values) (map[string]interface{}, error) {
 	err := checkOptionalKeys(apiName, optionals)
@@ -412,85 +791,6 @@ func (bc *Channel) query(apiName, apiMethod string, musts, optionals url.Values)
 	return resultMap, nil
 }
 
-// TagInfo represents information about a tag.
-type TagInfo struct {
-	TID        string
-	Tag        string
-	Info       string
-	Type       int // deprecated
-	CreateTime int64
-}
-
-// QueryTagsInfo querys tags information of app, opts contains optional parameters below.
-//
-// tag: name of the tag, must be of length 1-128, "default" is reserved so cannot be used.
-//
-// start: the start position of the returned records, defaults to 0.
-//
-// limit: the number of records returned, must be 1-100, defaults to 100.
-func (bc *Channel) QueryTagsInfo(opts url.Values) (int, []TagInfo, error) {
-	totalNum := 0
-	tagInfos := []TagInfo{}
-
-	err := checkOptionalKeys("QueryTagsInfo", opts)
-	if err != nil {
-		return totalNum, nil, err
-	}
-	query := absorbOptionalKeys(commonRequestParams(bc.apiKey, bc.deviceType), opts)
-
-	data, err := requestService(bc.host, "app", "query_tags", http.MethodGet, bc.secret, query)
-	if err != nil {
-		return totalNum, nil, err
-	}
-
-	result := map[string]interface{}{}
-	err = json.Unmarshal(data, &result)
-	if err != nil {
-		return totalNum, nil, err
-	}
-
-	bc.requestID = int64(result["request_id"].(float64))
-	if errCode, ok := result["error_code"]; ok {
-		return totalNum, nil, checkErrorCode(int(errCode.(float64)))
-	}
-
-	rspParams := result["response_params"].(map[string]interface{})
-	totalNum = int(rspParams["total_num"].(float64))
-	tags := rspParams["result"].([]interface{})
-
-	for _, tagData := range tags {
-		tagMap := tagData.(map[string]interface{})
-		tid := tagMap["tid"].(string)
-		tag := tagMap["tag"].(string)
-		info := tagMap["info"].(string)
-		typ := int(tagMap["type"].(float64))
-		createTime := int64(tagMap["create_time"].(float64))
-		tagInfo := TagInfo{
-			TID:        tid,
-			Tag:        tag,
-			Info:       info,
-			Type:       typ,
-			CreateTime: createTime,
-		}
-		tagInfos = append(tagInfos, tagInfo)
-	}
-	return totalNum, tagInfos, nil
-}
-
-// CreateTag creates an empty tag group.
-//
-// tag: name of the tag, must be of length 1-128, "default" is reserved so cannot be used.
-func (bc *Channel) CreateTag(tag string) (string, error) {
-	return bc.manageTag("create_tag", tag)
-}
-
-// DeleteTag deletes an existed tag group.
-//
-// tag: name of the tag, must be of length 1-128, "default" is reserved so cannot be used.
-func (bc *Channel) DeleteTag(tag string) (string, error) {
-	return bc.manageTag("del_tag", tag)
-}
-
 func (bc *Channel) manageTag(apiMethod, tag string) (string, error) {
 	retTag := ""
 
@@ -521,59 +821,6 @@ func (bc *Channel) manageTag(apiMethod, tag string) (string, error) {
 	}
 
 	return retTag, nil
-}
-
-// TagResult represents the result of add/delete devices from tag group.
-type TagResult struct {
-	ChnID string
-	Res   int
-}
-
-// AddTagDevices adds a batch of devices to a tag group.
-//
-// tag: name of the tag, must be of length 1-128, "default" is reserved so cannot be used.
-//
-// channelIDs: a string slice containing channel IDs to add, require at least 1 and at most 10.
-func (bc *Channel) AddTagDevices(tag string, channelIDs []string) ([]TagResult, error) {
-	return bc.manageTagDevices("add_devices", tag, channelIDs)
-}
-
-// DeleteTagDevices deletes a batch of devices from a tag group.
-//
-// tag: name of the tag, must be of length 1-128, "default" is reserved so cannot be used.
-//
-// channelIDs: a string slice containing channel IDs to add, require at least 1 and at most 10.
-func (bc *Channel) DeleteTagDevices(tag string, channelIDs []string) ([]TagResult, error) {
-	return bc.manageTagDevices("del_devices", tag, channelIDs)
-}
-
-// GetTagDevicesNumber returns the number of devices related to tag.
-func (bc *Channel) GetTagDevicesNumber(tag string) (int, error) {
-	num := 0
-
-	query := commonRequestParams(bc.apiKey, bc.deviceType)
-	query.Add("tag", tag)
-
-	data, err := requestService(bc.host, "tag", "device_num", http.MethodGet, bc.secret, query)
-	if err != nil {
-		return num, err
-	}
-
-	result := map[string]interface{}{}
-	err = json.Unmarshal(data, &result)
-	if err != nil {
-		return num, err
-	}
-
-	bc.requestID = int64(result["request_id"].(float64))
-	if errCode, ok := result["error_code"]; ok {
-		return num, checkErrorCode(int(errCode.(float64)))
-	}
-
-	rspParams := result["response_params"].(map[string]interface{})
-	num = int(rspParams["device_num"].(float64))
-
-	return num, nil
 }
 
 func (bc *Channel) manageTagDevices(apiMethod, tag string, channelIDs []string) ([]TagResult, error) {

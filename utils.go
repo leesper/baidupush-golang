@@ -71,6 +71,12 @@ var (
 			"start":       true,
 			"limit":       true,
 		},
+		"QueryTopicList": {
+			"expires":     true,
+			"device_type": true,
+			"start":       true,
+			"limit":       true,
+		},
 	}
 )
 
