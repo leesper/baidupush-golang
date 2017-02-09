@@ -8,9 +8,9 @@ import (
 )
 
 var (
-	channelID = "4215667327923129295"
-	apiKey    = "NM2AmKF7f84qw7l26h1ICEVf"
-	secret    = "LlITGDusuKhLTuBKoBjP2yCZLql3Ieun"
+	channelID = "YOUR DEVICE CHANNELID HERE"
+	apiKey    = "YOUR API KEY HERE"
+	secret    = "YOUR API SECRET HERE"
 	channel   = NewChannelDefaultHost(apiKey, secret, AndroidDeviceType)
 )
 
